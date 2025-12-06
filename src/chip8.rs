@@ -1,3 +1,5 @@
+use rand::Rng;
+use rand::distr::StandardUniform;
 use rand::rngs::ThreadRng;
 
 // =================================
@@ -77,6 +79,7 @@ impl Chip8 {
     // System constants (Specifications)
     const ADDRESS_BITS: u16 = 12;
     const MAX_ADDRESS: u16 = (1 << Self::ADDRESS_BITS) - 1;
+    const SIZE_OF_SPRITE: u16 = 5;
 
     // Creating a new chip8 instance
     fn new() -> Chip8 {
@@ -126,8 +129,10 @@ impl Chip8 {
     // Emulating one CPU cycle
     fn emulateCycle(&mut self) {
         // Fetch opcode
-        let opcode: u16 =
-            u16::from_be_bytes([self.memory[self.pc as usize], self.memory[self.pc as usize]]);
+        let opcode: u16 = u16::from_be_bytes([
+            self.memory[self.pc as usize],
+            self.memory[self.pc as usize + 1],
+        ]);
 
         match (opcode & 0xF000) {
             0x0000 => match opcode {
@@ -264,7 +269,7 @@ impl Chip8 {
         let value: u8 = (opcode & 0x00FF) as u8;
         let register: usize = reg_x!(opcode);
 
-        self.registers[register].wrapping_add(value);
+        self.registers[register] = self.registers[register].wrapping_add(value);
     }
 
     // Store the value of register VY in register VX
@@ -399,9 +404,9 @@ impl Chip8 {
     #[inline]
     fn _opcode_CXNN(&mut self, opcode: u16) {
         let registerX = reg_x!(opcode);
-        let mask = extract_bits!(opcode, 0, 0xFF);
+        let mask = extract_bits!(opcode, 0, 0xFF) as u8;
 
-        let random_number: u8 = self.rng.gen();
+        let random_number: u8 = self.rng.sample(StandardUniform);
         self.registers[registerX] = random_number & mask;
     }
 
@@ -409,6 +414,95 @@ impl Chip8 {
     // Set VF if any pixels are changed to unset
     #[inline]
     fn _opcode_DXYN(&mut self, opcode: u16) {
+        //TODO: Finish opcode DXYN implementation (what da hell is a sprite?)
         unimplemented!();
+    }
+
+    // Skip the following instruction if key, corresponding to hex value in VX is pressed
+    #[inline]
+    fn _opcode_EX9E(&mut self, opcode: u16) {
+        let registerX = reg_x!(opcode);
+        let value = self.registers[registerX] as usize;
+
+        if (self.keypad[value] == 1) {
+            self.pc += 2;
+        }
+    }
+
+    // Skip the following instruction if key, corresponding to hex value in VX is NOT pressed
+    #[inline]
+    fn _opcode_EXA1(&mut self, opcode: u16) {
+        let registerX = reg_x!(opcode);
+        let value = self.registers[registerX] as usize;
+
+        if (self.keypad[value] == 0) {
+            self.pc += 2;
+        }
+    }
+
+    // Store current value of delay in VX
+    #[inline]
+    fn _opcode_FX07(&mut self, opcode: u16) {
+        let registerX = reg_x!(opcode);
+        self.registers[registerX] = self.timer_delay;
+    }
+
+    // Wait for a keypress and store the result in register VX
+    #[inline]
+    fn _opcode_FX0A(&mut self, opcode: u16) {
+        if let Some(&key) = self.keypad.iter().find(|&&k| k == 1) {
+            let register = reg_x!(opcode);
+            self.registers[register] = key;
+            return;
+        }
+
+        // Decrement to execute this instruction again next cycle
+        // Not very pretty, but everything else would be more complicated...
+        // Maybe add a flag in the future?
+        self.pc -= 2;
+    }
+
+    // Set the sound timer to the value of register VX
+    #[inline]
+    fn _opcode_FX18(&mut self, opcode: u16) {
+        let register = reg_x!(opcode);
+        self.timer_sound = self.registers[register];
+    }
+
+    // Add the value in VX to register I
+    #[inline]
+    fn _opcode_FX1E(&mut self, opcode: u16) {
+        let register = reg_x!(opcode);
+        self.index = self.index.wrapping_add(self.registers[register] as u16);
+    }
+
+    // Set I to the memory address of the sprite data corresponding to VX
+    #[inline]
+    fn _opcode_FX29(&mut self, opcode: u16) {
+        let register = reg_x!(opcode);
+        let digit = self.registers[register];
+        self.index = digit as u16 * Chip8::SIZE_OF_SPRITE;
+    }
+
+    // Store the binary-coded decimal equivalent of the value stored in VX at addresses:
+    // I, I + 1 and I + 2
+    #[inline]
+    fn _opcode_FX33(&mut self, opcode: u16) {
+        let register = reg_x!(opcode);
+        let value = self.registers[register];
+
+        // Bounds checking for debugging
+        // Even though rust would panic anyways, this is nicer for debugging
+        if self.index > (Chip8::MAX_ADDRESS - 2) {
+            panic!(
+                "Opcode FX33 ({:04X}): Not enough memory left! Index would write out-of-bound.",
+                self.pc
+            );
+        }
+
+        for i in 0..3 {
+            // TODO: Finish opcode FX33 implementation
+            unimplemented!();
+        }
     }
 }

@@ -52,6 +52,10 @@ macro_rules! reg_y {
 // =================================
 // Implementation of Chip8
 // =================================
+
+//WARNING: Cannot implement PartialEq, since rng does not implement Eq => Solution: build snapshot
+//struct for tests?
+#[derive(Debug, PartialEq, Clone)]
 struct Chip8 {
     opcode: u16,
 
@@ -136,54 +140,119 @@ impl Chip8 {
 
         match (opcode & 0xF000) {
             0x0000 => match opcode {
-                0x00E0 => {self._opcode_00E0();} // Clear screen
-                0x00EE => {self._opcode_00EE();} // Return from subroutine
-                _ => {self._opcode_0NNN(opcode);}      // Execute machine language subroutine at NNN
+                0x00E0 => {
+                    self._opcode_00E0();
+                } // Clear screen
+                0x00EE => {
+                    self._opcode_00EE();
+                } // Return from subroutine
+                _ => {
+                    self._opcode_0NNN(opcode);
+                } // Execute machine language subroutine at NNN
             },
 
-            0x1000 => {self._opcode_1NNN(opcode);} // Jump to address NNN
-            0x2000 => {self._opcode_2NNN(opcode);} // Execute subroutine at NNN
-            0x3000 => {self._opcode_3XNN(opcode);} // Skip the following instruction in value of VX equals NN
-            0x4000 => {self._opcode_4XNN(opcode);} // Skip the following instruction if value of VX not equal NN
-            0x5000 => {self._opcode_5XY0(opcode);} // Skip the following instruction if value in VX equal to value in VY
-            0x6000 => {self._opcode_6XNN(opcode);} // Store number NN in VX
-            0x7000 => {self._opcode_7XNN(opcode);} // Add value NN to VX
+            0x1000 => {
+                self._opcode_1NNN(opcode);
+            } // Jump to address NNN
+            0x2000 => {
+                self._opcode_2NNN(opcode);
+            } // Execute subroutine at NNN
+            0x3000 => {
+                self._opcode_3XNN(opcode);
+            } // Skip the following instruction in value of VX equals NN
+            0x4000 => {
+                self._opcode_4XNN(opcode);
+            } // Skip the following instruction if value of VX not equal NN
+            0x5000 => {
+                self._opcode_5XY0(opcode);
+            } // Skip the following instruction if value in VX equal to value in VY
+            0x6000 => {
+                self._opcode_6XNN(opcode);
+            } // Store number NN in VX
+            0x7000 => {
+                self._opcode_7XNN(opcode);
+            } // Add value NN to VX
             0x8000 => match (opcode & 0x000F) {
-                0x0 => {self._opcode_8XY0(opcode);} // Set VX to VY
-                0x1 => {self._opcode_8XY1(opcode);} // Set VX to VX OR VY
-                0x2 => {self._opcode_8XY2(opcode);} // Set VX to VX AND VY
-                0x3 => {self._opcode_8XY3(opcode);} // Set VX to VX XOR VY
-                0x4 => {self._opcode_8XY4(opcode);} // Add the value of VY to VX (VF = 1 if carry otherwise 0)
-                0x5 => {self._opcode_8XY5(opcode);} // Subtract VY from VX (VF = 1 if borrow occurs, otherwise 0)
-                0x6 => {self._opcode_8XY6(opcode);} // Shift VY right 1 bit, store in VX (VF = LSB prior to shift)
-                0x7 => {self._opcode_8XY7(opcode);} // Set VX to VY minus VX (VF = 1 if borrow occurs)
-                0xE => {self._opcode_8XYE(opcode);} // Shift VY left 1 bit, store in VX (VF = MSB prior to shift)
+                0x0 => {
+                    self._opcode_8XY0(opcode);
+                } // Set VX to VY
+                0x1 => {
+                    self._opcode_8XY1(opcode);
+                } // Set VX to VX OR VY
+                0x2 => {
+                    self._opcode_8XY2(opcode);
+                } // Set VX to VX AND VY
+                0x3 => {
+                    self._opcode_8XY3(opcode);
+                } // Set VX to VX XOR VY
+                0x4 => {
+                    self._opcode_8XY4(opcode);
+                } // Add the value of VY to VX (VF = 1 if carry otherwise 0)
+                0x5 => {
+                    self._opcode_8XY5(opcode);
+                } // Subtract VY from VX (VF = 1 if borrow occurs, otherwise 0)
+                0x6 => {
+                    self._opcode_8XY6(opcode);
+                } // Shift VY right 1 bit, store in VX (VF = LSB prior to shift)
+                0x7 => {
+                    self._opcode_8XY7(opcode);
+                } // Set VX to VY minus VX (VF = 1 if borrow occurs)
+                0xE => {
+                    self._opcode_8XYE(opcode);
+                } // Shift VY left 1 bit, store in VX (VF = MSB prior to shift)
                 _ => panic!("Unknown opcode"),
             },
 
-            0xA000 => {self._opcode_ANNN(opcode);} // Store memory address NNN in I
-            0xB000 => {self._opcode_BNNN(opcode);} // Jump to address NNN + V0
-            0xD000 => {self._opcode_DXYN(opcode);} // Draw sprite
+            0xA000 => {
+                self._opcode_ANNN(opcode);
+            } // Store memory address NNN in I
+            0xB000 => {
+                self._opcode_BNNN(opcode);
+            } // Jump to address NNN + V0
+            0xD000 => {
+                self._opcode_DXYN(opcode);
+            } // Draw sprite
             0xE000 => match (opcode & 0x00FF) {
-                0x9E => {self._opcode_EX9E(opcode);} // Skip instruction if key in VX pressed
-                0xA1 => {self._opcode_EXA1(opcode);} // Skip instruction if key in VX not pressed
+                0x9E => {
+                    self._opcode_EX9E(opcode);
+                } // Skip instruction if key in VX pressed
+                0xA1 => {
+                    self._opcode_EXA1(opcode);
+                } // Skip instruction if key in VX not pressed
                 _ => panic!("Unknown opcode"),
             },
 
             0xF000 => match (opcode & 0x00FF) {
-                0x07 => {self._opcode_FX07(opcode);} // Store the current delay in register VX
-                0x0A => {self._opcode_FX0A(opcode);} // Wait for keypress, store result in VX
-                0x15 => {self._opcode_FX0A(opcode);} // Set delay timer to VX
-                0x18 => {self._opcode_FX18(opcode);} // Set sound timer to VX
-                0x1E => {self._opcode_FX1E(opcode);} // Add value in VX to I
-                0x29 => {self._opcode_FX29(opcode);} // Set I to memory of sprite stored in VX
-                0x33 => {self._opcode_FX33(opcode);} // Store V0-VX inclusive in memory starting at I
+                0x07 => {
+                    self._opcode_FX07(opcode);
+                } // Store the current delay in register VX
+                0x0A => {
+                    self._opcode_FX0A(opcode);
+                } // Wait for keypress, store result in VX
+                0x15 => {
+                    self._opcode_FX0A(opcode);
+                } // Set delay timer to VX
+                0x18 => {
+                    self._opcode_FX18(opcode);
+                } // Set sound timer to VX
+                0x1E => {
+                    self._opcode_FX1E(opcode);
+                } // Add value in VX to I
+                0x29 => {
+                    self._opcode_FX29(opcode);
+                } // Set I to memory of sprite stored in VX
+                0x33 => {
+                    self._opcode_FX33(opcode);
+                } // Store V0-VX inclusive in memory starting at I
                 0x65 => {} // Fill V0-VX inclusive with memory starting at I
                 _ => panic!("Unknown opcode"),
             },
 
             _ => panic!("Unknown opcode"),
         }
+
+        // After executing opcode increment pc
+        self.pc += 2;
     }
 
     // Clear the screen
@@ -505,8 +574,9 @@ impl Chip8 {
             unimplemented!();
         }
     }
-}
 
+    //TODO: Finish last opcode FX65
+}
 
 // ===========================
 // Unit tests
@@ -517,8 +587,28 @@ impl Chip8 {
 mod opcode_tests {
     use super::*;
 
+    struct snapshot {
+        //TODO: Implement snapshot struct
+    }
+
+    fn load_opcode(opcode: u16, chip: &mut Chip8) {
+        let low = (opcode & 0x00FF) as u8;
+        let high = extract_bits!(opcode, 8, 0xFF) as u8;
+        let program = [high, low];
+
+        chip.init(&program);
+    }
+
     #[test]
-    fn test_0NNN {
-        
+    fn test_0NNN() {
+        let mut chip = Chip8::new();
+        load_opcode(0x0000, &mut chip);
+
+        let mut expected: Chip8 = chip.clone();
+        chip.emulateCycle();
+
+        // Only pc should have changed
+        expected.pc += 2;
+        assert_eq!(expected, chip);
     }
 }

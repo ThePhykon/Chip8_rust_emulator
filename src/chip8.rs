@@ -80,9 +80,11 @@ struct Chip8 {
 
 impl Chip8 {
     // System constants (Specifications)
+    //TODO: Move constants outside of chip8 (should be used in struct at compile time)
     const ADDRESS_BITS: u16 = 12;
     const MAX_ADDRESS: u16 = (1 << Self::ADDRESS_BITS) - 1;
     const SIZE_OF_SPRITE: u16 = 5;
+    const STACK_SIZE: u16 = 16;
 
     // Creating a new chip8 instance
     fn new() -> Chip8 {
@@ -588,6 +590,32 @@ impl Chip8 {
     }
 
     //TODO: Finish last opcode FX65
+    #[inline]
+    fn _opcode_FX65(&mut self, opcode: u16) {
+        unimplemented!();
+    }
+
+    // Helper function to push things on the stack with bounds-checking
+    fn stack_push(&mut self, address: u16) {
+        // Check bounds
+        if self.sp >= Chip8:: {
+            panic!("Stack overflow");
+        }
+
+        self.stack[self.sp as usize] = address;
+        self.sp += 1;
+    }
+
+    // Helper function to pop things from the stack with bounds-checking
+    fn stack_pop(&mut self) -> u16 {
+        // Check bounds
+        if self.sp < 1 {
+            panic!("Stack underflow");
+        }
+
+        self.sp -= 1;
+        return self.stack[self.sp as usize];
+    }
 }
 
 // ===========================

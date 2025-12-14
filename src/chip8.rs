@@ -27,6 +27,9 @@ const FONTSET: [u8; 80] = [
 // VF register index
 const REG_V0: usize = 0;
 const REG_VF: usize = 0xF;
+const ADDRESS_BITS: u16 = 12;
+const MAX_ADDRESS: u16 = (1 << ADDRESS_BITS) - 1;
+const SIZE_OF_SPRITE: u16 = 5;
 
 // =================================
 // Useful macros
@@ -53,9 +56,6 @@ macro_rules! reg_y {
 // Implementation of Chip8
 // =================================
 
-//WARNING: Cannot implement PartialEq, since rng does not implement Eq => Solution: build snapshot
-//struct for tests?
-
 #[cfg_attr(test, derive(Clone, Debug))]
 struct Chip8 {
     // Registers
@@ -81,11 +81,6 @@ struct Chip8 {
 impl Chip8 {
     // System constants (Specifications)
     //TODO: Move constants outside of chip8 (should be used in struct at compile time)
-    const ADDRESS_BITS: u16 = 12;
-    const MAX_ADDRESS: u16 = (1 << Self::ADDRESS_BITS) - 1;
-    const SIZE_OF_SPRITE: u16 = 5;
-    const STACK_SIZE: u16 = 16;
-
     // Creating a new chip8 instance
     fn new() -> Chip8 {
         return Chip8 {
@@ -263,12 +258,7 @@ impl Chip8 {
     // Return from subroutine
     #[inline]
     fn _opcode_00EE(&mut self) {
-        self.sp = self.sp.checked_sub(1).expect(&format!(
-            "Stack underflow! Trying to enter subroutine with empty-stack at {:04X}",
-            self.pc
-        ));
-
-        self.pc = self.stack[self.sp as usize];
+        self.pc = self.stack_pop();
     }
 
     // Execute machine language subroutine at address NNN
@@ -286,20 +276,8 @@ impl Chip8 {
     // Execute subroutine starting at address NNN
     #[inline]
     fn _opcode_2NNN(&mut self, opcode: u16) {
-        self.stack[self.sp as usize] = self.pc;
+        self.stack_push(self.pc);
         self.pc = opcode & 0x0FFF;
-
-        self.sp = self.sp.checked_add(1).expect(&format!(
-            "Stack overflow! Trying to enter subroutine with full-stack at {:04X}",
-            self.pc
-        ));
-
-        if (self.sp as usize) > self.stack.len() {
-            panic!(
-                "Stack overflow! Trying to enter subroutine with full-stack at {:04X}",
-                self.pc
-            );
-        }
     }
 
     // Skip the following instruction if the value of register VX is not equal to NN
@@ -473,7 +451,7 @@ impl Chip8 {
         let sum = address.checked_add(self.registers[0] as u16);
 
         match sum {
-            Some(s) if s <= Chip8::MAX_ADDRESS => address = s,
+            Some(s) if s <= MAX_ADDRESS => address = s,
             _ => panic!(
                 "SEGFAULT: Trying to access invalid address at {:04X}",
                 self.pc
@@ -564,7 +542,7 @@ impl Chip8 {
     fn _opcode_FX29(&mut self, opcode: u16) {
         let register = reg_x!(opcode);
         let digit = self.registers[register];
-        self.index = digit as u16 * Chip8::SIZE_OF_SPRITE;
+        self.index = digit as u16 * SIZE_OF_SPRITE;
     }
 
     // Store the binary-coded decimal equivalent of the value stored in VX at addresses:
@@ -576,7 +554,7 @@ impl Chip8 {
 
         // Bounds checking for debugging
         // Even though rust would panic anyways, this is nicer for debugging
-        if self.index > (Chip8::MAX_ADDRESS - 2) {
+        if self.index > (MAX_ADDRESS - 2) {
             panic!(
                 "Opcode FX33 ({:04X}): Not enough memory left! Index would write out-of-bound.",
                 self.pc
@@ -599,7 +577,7 @@ impl Chip8 {
     // Helper function to push things on the stack with bounds-checking
     fn stack_push(&mut self, address: u16) {
         // Check bounds
-        if self.sp >= Chip8::STACK_SIZE {
+        if self.sp as usize >= self.stack.len() {
             panic!("Stack overflow");
         }
 
@@ -610,11 +588,8 @@ impl Chip8 {
     // Helper function to pop things from the stack with bounds-checking
     fn stack_pop(&mut self) -> u16 {
         // Check bounds
-        if self.sp < 1 {
-            panic!("Stack underflow");
-        }
+        self.sp = self.sp.checked_sub(1).expect("Stack underflow");
 
-        self.sp -= 1;
         return self.stack[self.sp as usize];
     }
 }

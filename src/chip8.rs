@@ -599,7 +599,7 @@ impl Chip8 {
     // Helper function to push things on the stack with bounds-checking
     fn stack_push(&mut self, address: u16) {
         // Check bounds
-        if self.sp >= Chip8:: {
+        if self.sp >= Chip8::STACK_SIZE {
             panic!("Stack overflow");
         }
 

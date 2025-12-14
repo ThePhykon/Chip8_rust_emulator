@@ -55,10 +55,9 @@ macro_rules! reg_y {
 
 //WARNING: Cannot implement PartialEq, since rng does not implement Eq => Solution: build snapshot
 //struct for tests?
-#[derive(Debug, PartialEq, Clone)]
-struct Chip8 {
-    opcode: u16,
 
+#[cfg_attr(test, derive(Clone, Debug))]
+struct Chip8 {
     // Registers
     registers: [u8; 16],
     pc: u16,
@@ -88,7 +87,6 @@ impl Chip8 {
     // Creating a new chip8 instance
     fn new() -> Chip8 {
         return Chip8 {
-            opcode: 0,
             registers: [0; 16],
             pc: 0x200,
             index: 0,
@@ -107,7 +105,6 @@ impl Chip8 {
     // Init/Reset a chip8
     fn init(&mut self, program: &[u8]) {
         // Set reset all values
-        self.opcode = 0;
         self.registers = [0; 16];
         self.pc = 0x200;
         self.index = 0;
@@ -137,6 +134,9 @@ impl Chip8 {
             self.memory[self.pc as usize],
             self.memory[self.pc as usize + 1],
         ]);
+
+        // Increment pc directly in order to avoid confusion at jumps
+        self.pc += 2;
 
         match (opcode & 0xF000) {
             0x0000 => match opcode {
@@ -250,9 +250,6 @@ impl Chip8 {
 
             _ => panic!("Unknown opcode"),
         }
-
-        // After executing opcode increment pc
-        self.pc += 2;
     }
 
     // Clear the screen
@@ -264,8 +261,12 @@ impl Chip8 {
     // Return from subroutine
     #[inline]
     fn _opcode_00EE(&mut self) {
+        self.sp = self.sp.checked_sub(1).expect(&format!(
+            "Stack underflow! Trying to enter subroutine with empty-stack at {:04X}",
+            self.pc
+        ));
+
         self.pc = self.stack[self.sp as usize];
-        self.sp -= 1;
     }
 
     // Execute machine language subroutine at address NNN
@@ -283,9 +284,20 @@ impl Chip8 {
     // Execute subroutine starting at address NNN
     #[inline]
     fn _opcode_2NNN(&mut self, opcode: u16) {
-        self.sp += 1;
         self.stack[self.sp as usize] = self.pc;
         self.pc = opcode & 0x0FFF;
+
+        self.sp = self.sp.checked_add(1).expect(&format!(
+            "Stack overflow! Trying to enter subroutine with full-stack at {:04X}",
+            self.pc
+        ));
+
+        if (self.sp as usize) > self.stack.len() {
+            panic!(
+                "Stack overflow! Trying to enter subroutine with full-stack at {:04X}",
+                self.pc
+            );
+        }
     }
 
     // Skip the following instruction if the value of register VX is not equal to NN
@@ -587,16 +599,27 @@ impl Chip8 {
 mod opcode_tests {
     use super::*;
 
-    struct snapshot {
-        //TODO: Implement snapshot struct
-    }
-
     fn load_opcode(opcode: u16, chip: &mut Chip8) {
         let low = (opcode & 0x00FF) as u8;
         let high = extract_bits!(opcode, 8, 0xFF) as u8;
         let program = [high, low];
 
         chip.init(&program);
+    }
+
+    impl PartialEq for Chip8 {
+        fn eq(&self, other: &Self) -> bool {
+            self.registers == other.registers
+                && self.pc == other.pc
+                && self.index == other.index
+                && self.timer_delay == other.timer_delay
+                && self.timer_sound == other.timer_sound
+                && self.memory == other.memory
+                && self.stack == other.stack
+                && self.sp == other.sp
+                && self.graphics == other.graphics
+                && self.keypad == other.keypad
+        }
     }
 
     #[test]
@@ -609,6 +632,47 @@ mod opcode_tests {
 
         // Only pc should have changed
         expected.pc += 2;
+        assert_eq!(expected, chip);
+    }
+
+    #[test]
+    fn test_00E0() {
+        let mut chip = Chip8::new();
+        load_opcode(0x00E0, &mut chip);
+
+        // Set display
+        chip.graphics.fill(1);
+
+        // Set expected
+        let mut expected = chip.clone();
+        expected.pc += 2;
+        expected.graphics.fill(0);
+
+        // Run cycle
+        chip.emulateCycle();
+
+        // Asserts
+        assert_eq!(expected, chip);
+    }
+
+    #[test]
+    fn test_00EE() {
+        let mut chip = Chip8::new();
+        load_opcode(0x00EE, &mut chip);
+
+        // Prepare setup
+        chip.stack[chip.sp as usize] = 0x300;
+        chip.sp += 1;
+
+        // Set expected
+        let mut expected = chip.clone();
+        expected.sp -= 1; // Pop first stack entry
+        expected.pc = 0x300; // Jump to return-address
+
+        // Run cycle
+        chip.emulateCycle();
+
+        // Assert
         assert_eq!(expected, chip);
     }
 }

@@ -595,6 +595,7 @@ impl Chip8 {
         unimplemented!();
     }
 
+    //TODO: Integrate push and pop functions into code
     // Helper function to push things on the stack with bounds-checking
     fn stack_push(&mut self, address: u16) {
         // Check bounds

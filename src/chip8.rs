@@ -603,6 +603,13 @@ impl Chip8 {
 mod opcode_tests {
     use super::*;
 
+    // Macro to shadow prelude with pretty_assertions
+    macro_rules! assert_eq {
+        ($($tt:tt)*) => {
+            pretty_assertions::assert_eq!($($tt)*)
+        };
+    }
+
     fn load_opcode(opcode: u16, chip: &mut Chip8) {
         let low = (opcode & 0x00FF) as u8;
         let high = extract_bits!(opcode, 8, 0xFF) as u8;
@@ -659,24 +666,165 @@ mod opcode_tests {
         assert_eq!(expected, chip);
     }
 
+    mod test_00EE {
+        use super::*;
+
+        #[test]
+        fn test_00EE_normal() {
+            let mut chip = Chip8::new();
+            load_opcode(0x00EE, &mut chip);
+
+            // Prepare setup
+            chip.stack[chip.sp as usize] = 0x300;
+            chip.sp += 1;
+
+            // Set expected
+            let mut expected = chip.clone();
+            expected.sp -= 1; // Pop first stack entry
+            expected.pc = 0x300; // Jump to return-address
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+
+        #[test]
+        #[should_panic]
+        fn test_00EE_underflow() {
+            let mut chip = Chip8::new();
+            load_opcode(0x00EE, &mut chip);
+
+            // Prepare setup
+            chip.sp = 0;
+
+            // Run cycle -> should cause a panic
+            chip.emulateCycle();
+        }
+    }
+
     #[test]
-    fn test_00EE() {
+    fn test_1NNN() {
         let mut chip = Chip8::new();
-        load_opcode(0x00EE, &mut chip);
+        load_opcode(0x1300, &mut chip);
 
         // Prepare setup
-        chip.stack[chip.sp as usize] = 0x300;
-        chip.sp += 1;
-
-        // Set expected
         let mut expected = chip.clone();
-        expected.sp -= 1; // Pop first stack entry
-        expected.pc = 0x300; // Jump to return-address
+        expected.pc = 0x300;
 
         // Run cycle
         chip.emulateCycle();
 
         // Assert
         assert_eq!(expected, chip);
+    }
+
+    mod test_2NNN {
+        use super::*;
+
+        #[test]
+        fn test_2NNN_normal() {
+            let mut chip = Chip8::new();
+            load_opcode(0x2300, &mut chip);
+
+            // Prepare setup
+            let mut expected = chip.clone();
+            expected.pc += 2;
+            expected.stack[0] = expected.pc;
+            expected.pc = 0x300;
+            expected.sp = 1;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+
+        #[test]
+        #[should_panic]
+        fn test_2NNN_overflow() {
+            let mut chip = Chip8::new();
+            load_opcode(0x2300, &mut chip);
+
+            // Prepare setup
+            chip.sp = chip.stack.len() as u16;
+
+            // Run cycle -> should panic
+            chip.emulateCycle();
+        }
+    }
+
+    mod test_3XNN {
+        use super::*;
+
+        #[test]
+        fn test_3XNN_skip() {
+            let mut chip = Chip8::new();
+            load_opcode(0x3000, &mut chip);
+
+            // Prepare setup
+            let mut expected = chip.clone();
+            expected.pc += 4;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+
+        #[test]
+        fn test_3XNN_noskip() {
+            let mut chip = Chip8::new();
+            load_opcode(0x3001, &mut chip);
+
+            // Prepare setup
+            let mut expected = chip.clone();
+            expected.pc += 2;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+    }
+
+    mod test_4XNN {
+        use super::*;
+
+        #[test]
+        fn test_4XNN_skip() {
+            let mut chip = Chip8::new();
+            load_opcode(0x4001, &mut chip);
+
+            // Prepare setup
+            let mut expected = chip.clone();
+            expected.pc += 4;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+
+        #[test]
+        fn test_4XNN_noskip() {
+            let mut chip = Chip8::new();
+            load_opcode(0x4000, &mut chip);
+
+            // Prepare setup
+            let mut expected = chip.clone();
+            expected.pc += 2;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
     }
 }

@@ -604,6 +604,7 @@ mod opcode_tests {
     use super::*;
 
     // Macro to shadow prelude with pretty_assertions
+    //TODO: Find better solution since due to the memory array, things can get very messy
     macro_rules! assert_eq {
         ($($tt:tt)*) => {
             pretty_assertions::assert_eq!($($tt)*)
@@ -881,5 +882,47 @@ mod opcode_tests {
 
         // Assert
         assert_eq!(expected, chip);
+    }
+
+    mod test_7XNN {
+        use super::*;
+
+        #[test]
+        fn test_7XNN_normal() {
+            let mut chip = Chip8::new();
+            load_opcode(0x7022, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = 1;
+
+            let mut expected = chip.clone();
+            expected.pc += 2;
+            expected.registers[0] += 0x22;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+
+        #[test]
+        fn test_7XNN_overflow() {
+            let mut chip = Chip8::new();
+            load_opcode(0x7001, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = 0xFF;
+
+            let mut expected = chip.clone();
+            expected.pc += 2;
+            expected.registers[0] = 0;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
     }
 }

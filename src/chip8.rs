@@ -609,6 +609,7 @@ mod opcode_tests {
         };
     }
 
+    // Helper function to load a single opcode as program into the chip
     fn load_opcode(opcode: u16, chip: &mut Chip8) {
         let low = (opcode & 0x00FF) as u8;
         let high = extract_bits!(opcode, 8, 0xFF) as u8;
@@ -617,6 +618,7 @@ mod opcode_tests {
         chip.init(&program);
     }
 
+    // Manually implementing PartialEq for asserts (excluding random rng)
     impl PartialEq for Chip8 {
         fn eq(&self, other: &Self) -> bool {
             self.registers == other.registers

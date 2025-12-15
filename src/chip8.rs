@@ -865,4 +865,21 @@ mod opcode_tests {
             assert_eq!(expected, chip);
         }
     }
+
+    #[test]
+    fn test_6XNN() {
+        let mut chip = Chip8::new();
+        load_opcode(0x6022, &mut chip);
+
+        // Prepare setup
+        let mut expected = chip.clone();
+        expected.pc += 2;
+        expected.registers[0] = 0x22;
+
+        // Run cycle
+        chip.emulateCycle();
+
+        // Assert
+        assert_eq!(expected, chip);
+    }
 }

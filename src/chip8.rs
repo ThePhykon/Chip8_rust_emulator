@@ -310,7 +310,7 @@ impl Chip8 {
         let registerX: usize = reg_x!(opcode);
         let registerY: usize = reg_y!(opcode);
 
-        if (self.registers[registerX] != self.registers[registerY]) {
+        if (self.registers[registerX] == self.registers[registerY]) {
             self.pc += 2;
         }
     }
@@ -817,6 +817,44 @@ mod opcode_tests {
             load_opcode(0x4000, &mut chip);
 
             // Prepare setup
+            let mut expected = chip.clone();
+            expected.pc += 2;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+    }
+
+    mod test_5XY0 {
+        use super::*;
+
+        #[test]
+        fn test_5XY0_skip() {
+            let mut chip = Chip8::new();
+            load_opcode(0x5010, &mut chip);
+
+            // Prepare setup
+            let mut expected = chip.clone();
+            expected.pc += 4;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+
+        #[test]
+        fn test_5XY0_noskip() {
+            let mut chip = Chip8::new();
+            load_opcode(0x5010, &mut chip);
+
+            // Prepare setup
+            chip.registers[1] = 1;
+
             let mut expected = chip.clone();
             expected.pc += 2;
 

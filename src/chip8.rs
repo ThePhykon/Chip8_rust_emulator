@@ -925,4 +925,23 @@ mod opcode_tests {
             assert_eq!(expected, chip);
         }
     }
+
+    #[test]
+    fn test_8XY0() {
+        let mut chip = Chip8::new();
+        load_opcode(0x8010, &mut chip);
+
+        // Prepare setup
+        chip.registers[1] = 1;
+
+        let mut expected = chip.clone();
+        expected.pc += 2;
+        expected.registers[0] = expected.registers[1];
+
+        // Run cycle
+        chip.emulateCycle();
+
+        // Assert
+        assert_eq!(expected, chip);
+    }
 }

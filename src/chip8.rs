@@ -197,7 +197,9 @@ impl Chip8 {
                 } // Shift VY left 1 bit, store in VX (VF = MSB prior to shift)
                 _ => panic!("Unknown opcode"),
             },
-
+            0x9000 => {
+                self._opcode_9XY0(opcode);
+            } // Skip instruction if VX and VY not equal
             0xA000 => {
                 self._opcode_ANNN(opcode);
             } // Store memory address NNN in I
@@ -1115,6 +1117,35 @@ mod opcode_tests {
     }
 
     #[test]
+    fn test_8XY7() {
+        let cases = [
+            (0x00, 0x00, 0x00, 0x00),
+            (0x01, 0x01, 0x00, 0x00),
+            (0x01, 0x00, 0xFF, 0x01),
+        ];
+
+        for (vx, vy, res, vf) in cases {
+            let mut chip = Chip8::new();
+            load_opcode(0x8017, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = vx;
+            chip.registers[1] = vy;
+
+            let mut expected = chip.clone();
+            expected.pc += 2;
+            expected.registers[0] = res;
+            expected.registers[REG_VF] = vf;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+    }
+
+    #[test]
     fn test_8XYE() {
         let cases = [(0x0, 0x0, 0x0), (0xFF, 0xFE, 0x1)];
 
@@ -1129,6 +1160,29 @@ mod opcode_tests {
             expected.pc += 2;
             expected.registers[0] = res;
             expected.registers[REG_VF] = vf;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+    }
+
+    #[test]
+    fn test_9XY0() {
+        let cases = [(0x0, 0x1, 4), (0x0, 0x0, 2)];
+
+        for (vx, vy, pc) in cases {
+            let mut chip = Chip8::new();
+            load_opcode(0x9010, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = vx;
+            chip.registers[1] = vy;
+
+            let mut expected = chip.clone();
+            expected.pc += pc;
 
             // Run cycle
             chip.emulateCycle();

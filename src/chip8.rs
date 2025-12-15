@@ -79,8 +79,6 @@ struct Chip8 {
 }
 
 impl Chip8 {
-    // System constants (Specifications)
-    //TODO: Move constants outside of chip8 (should be used in struct at compile time)
     // Creating a new chip8 instance
     fn new() -> Chip8 {
         return Chip8 {

@@ -1089,4 +1089,52 @@ mod opcode_tests {
             assert_eq!(expected, chip);
         }
     }
+
+    #[test]
+    fn test_8XY6() {
+        let cases = [(0b1, 0b0, 0b1), (0b10, 0b01, 0b0)];
+
+        for (vy, res, vf) in cases {
+            let mut chip = Chip8::new();
+            load_opcode(0x8016, &mut chip);
+
+            // Prepare setup
+            chip.registers[1] = vy;
+
+            let mut expected = chip.clone();
+            expected.pc += 2;
+            expected.registers[0] = res;
+            expected.registers[REG_VF] = vf;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+    }
+
+    #[test]
+    fn test_8XYE() {
+        let cases = [(0x0, 0x0, 0x0), (0xFF, 0xFE, 0x1)];
+
+        for (vy, res, vf) in cases {
+            let mut chip = Chip8::new();
+            load_opcode(0x801E, &mut chip);
+
+            // Prepare setup
+            chip.registers[1] = vy;
+
+            let mut expected = chip.clone();
+            expected.pc += 2;
+            expected.registers[0] = res;
+            expected.registers[REG_VF] = vf;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+    }
 }

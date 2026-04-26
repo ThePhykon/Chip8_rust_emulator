@@ -1,3 +1,6 @@
+use std::ops::Deref;
+use std::thread::current;
+
 use rand::Rng;
 use rand::distr::StandardUniform;
 use rand::rngs::ThreadRng;
@@ -30,6 +33,8 @@ const REG_VF: usize = 0xF;
 const ADDRESS_BITS: u16 = 12;
 const MAX_ADDRESS: u16 = (1 << ADDRESS_BITS) - 1;
 const SIZE_OF_SPRITE: u16 = 5;
+const DISPLAY_HEIGHT: usize = 32;
+const DISPLAY_WIDTH: usize = 64;
 
 // =================================
 // Useful macros
@@ -71,7 +76,7 @@ struct Chip8 {
     sp: u16,
 
     // I/O
-    graphics: [u8; 64 * 32],
+    graphics: [u8; DISPLAY_HEIGHT * DISPLAY_WIDTH],
     keypad: [u8; 16],
 
     // Utils
@@ -80,6 +85,7 @@ struct Chip8 {
 
 impl Chip8 {
     // Creating a new chip8 instance
+    //TODO: Move chip instance to heap instead of stack
     fn new() -> Chip8 {
         return Chip8 {
             registers: [0; 16],
@@ -90,7 +96,7 @@ impl Chip8 {
             memory: [0; 4096],
             stack: [0; 16],
             sp: 0,
-            graphics: [0; 64 * 32],
+            graphics: [0; DISPLAY_HEIGHT * DISPLAY_WIDTH],
             keypad: [0; 16],
 
             rng: rand::thread_rng(),
@@ -98,7 +104,7 @@ impl Chip8 {
     }
 
     // Init/Reset a chip8
-    fn init(&mut self, program: &[u8]) {
+    fn init(&mut self, program: &[u16]) {
         // Set reset all values
         self.registers = [0; 16];
         self.pc = 0x200;
@@ -117,9 +123,17 @@ impl Chip8 {
         }
 
         // Load program into memory
-        for i in 0..program.len() {
-            self.memory[i + self.pc as usize] = program[i];
+        let mut memory_pos = self.pc;
+        for opcode in program {
+            let low = (opcode & 0x00FF) as u8;
+            let high = extract_bits!(opcode, 8, 0xFF) as u8;
+            self.memory[memory_pos as usize] = high;
+            self.memory[(memory_pos + 1) as usize] = low;
+
+            memory_pos += 2;
         }
+
+        dbg!(self.memory[self.pc as usize]);
     }
 
     // Emulating one CPU cycle
@@ -475,8 +489,43 @@ impl Chip8 {
     // Set VF if any pixels are changed to unset
     #[inline]
     fn _opcode_DXYN(&mut self, opcode: u16) {
-        //TODO: Finish opcode DXYN implementation (what da hell is a sprite?)
-        unimplemented!();
+        let coordX = reg_x!(opcode) % DISPLAY_WIDTH;
+        let mut coordY = reg_y!(opcode) % DISPLAY_HEIGHT;
+        let num_bytes = extract_bits!(opcode, 0, 0xF);
+
+        let sprites = &self.memory[self.index as usize..(self.index + num_bytes) as usize];
+        self.registers[REG_VF] = 0;
+
+        for sprite in sprites {
+            // Paint each pixel
+            for i in 0..8 {
+                let x_option = coordX.checked_add(i);
+
+                // If we reached the border of the monitor, go to the next row (Clipping)
+                if x_option.is_none() {
+                    break;
+                }
+
+                // Safe since we checked before
+                let x = x_option.unwrap();
+
+                let pixel = self.graphics[coordY * DISPLAY_WIDTH + x];
+                let sprite_pixel = extract_bits!(sprite, (7 - i), 0x1);
+
+                if (pixel == 1) && (sprite_pixel == 1) && (self.registers[REG_VF] == 0) {
+                    self.registers[REG_VF] = 1;
+                }
+
+                self.graphics[coordY * DISPLAY_WIDTH + x] = pixel ^ sprite_pixel;
+            }
+
+            // Safely move to next column (=> clipping if necessary)
+            if let Some(y) = coordY.checked_add(1) {
+                coordY = y;
+            } else {
+                break;
+            }
+        }
     }
 
     // Skip the following instruction if key, corresponding to hex value in VX is pressed
@@ -511,9 +560,9 @@ impl Chip8 {
     // Wait for a keypress and store the result in register VX
     #[inline]
     fn _opcode_FX0A(&mut self, opcode: u16) {
-        if let Some(&key) = self.keypad.iter().find(|&&k| k == 1) {
-            let register = reg_x!(opcode);
-            self.registers[register] = key;
+        if let Some(key_index) = self.keypad.iter().position(|&k| k == 1) {
+            let reg = reg_x!(opcode);
+            self.registers[reg] = key_index as u8;
             return;
         }
 
@@ -613,10 +662,7 @@ mod opcode_tests {
 
     // Helper function to load a single opcode as program into the chip
     fn load_opcode(opcode: u16, chip: &mut Chip8) {
-        let low = (opcode & 0x00FF) as u8;
-        let high = extract_bits!(opcode, 8, 0xFF) as u8;
-        let program = [high, low];
-
+        let program = [opcode];
         chip.init(&program);
     }
 
@@ -1190,5 +1236,213 @@ mod opcode_tests {
             // Assert
             assert_eq!(expected, chip);
         }
+    }
+
+    #[test]
+    fn test_ANNN() {
+        let mut chip = Chip8::new();
+        load_opcode(0xA111, &mut chip);
+
+        // Prepare setup
+        chip.index = 0;
+
+        let mut expected = chip.clone();
+        expected.index = 0x111;
+        expected.pc += 2;
+
+        // Run cycle
+        chip.emulateCycle();
+
+        // Assert
+        assert_eq!(expected, chip);
+    }
+
+    mod test_BNNN {
+        use super::*;
+
+        #[test]
+        fn test_BNNN_normal() {
+            // [NNN, V0, RESULT]
+            let cases = [(1, 0, 1), (1, 1, 2)];
+
+            for (n, v, r) in cases {
+                let mut chip = Chip8::new();
+                load_opcode((0xB000 | n), &mut chip);
+
+                // Prepare setup
+                chip.registers[0] = v;
+
+                let mut expected = chip.clone();
+                expected.pc = r;
+
+                // Run cycle
+                chip.emulateCycle();
+
+                // Assert
+                assert_eq!(expected, chip);
+            }
+        }
+
+        #[test]
+        #[should_panic]
+        fn test_BNNN_overflow() {
+            let mut chip = Chip8::new();
+            load_opcode(0xB000 | u16::MAX, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = 1;
+
+            // Run cycle -> should panic
+            chip.emulateCycle();
+        }
+
+        #[test]
+        #[should_panic]
+        fn test_BNNN_invalid_address() {
+            let mut chip = Chip8::new();
+            load_opcode(0xBFFF, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = 1;
+
+            // Run cycle -> should panic
+            chip.emulateCycle();
+        }
+    }
+
+    #[test]
+    fn test_CXNN() {
+        // We skip this test for now
+    }
+
+    #[test]
+    fn test_DXYN() {
+        let sprites: [u8; 5] = [0b01010101, 0b10101010, 0b01010101, 0b10101010, 0b01010101];
+
+        // Constructing graphic buffer
+        let mut graphic_buffer = [0u8; DISPLAY_WIDTH * DISPLAY_HEIGHT];
+        graphic_buffer[0..8].copy_from_slice(&[0, 1, 0, 1, 0, 1, 0, 1]);
+        let row1 = DISPLAY_WIDTH;
+        graphic_buffer[row1..row1 + 8].copy_from_slice(&[1, 0, 1, 0, 1, 0, 1, 0]);
+        let row2 = 2 * DISPLAY_WIDTH;
+        graphic_buffer[row2..row2 + 8].copy_from_slice(&[0, 1, 0, 1, 0, 1, 0, 1]);
+        let row3 = 3 * DISPLAY_WIDTH;
+        graphic_buffer[row3..row3 + 8].copy_from_slice(&[1, 0, 1, 0, 1, 0, 1, 0]);
+        let row4 = 4 * DISPLAY_WIDTH;
+        graphic_buffer[row4..row4 + 8].copy_from_slice(&[0, 1, 0, 1, 0, 1, 0, 1]);
+
+        // Create new chip instance
+        let mut chip = Chip8::new();
+
+        // Load program
+        let program = [0xD005, 0xD005];
+
+        // Init chip with program
+        chip.init(&program);
+
+        let index = 0x250;
+        chip.index = index;
+
+        for (i, &sprite) in sprites.iter().enumerate() {
+            chip.memory[index as usize + i] = sprite;
+        }
+
+        chip.registers[REG_VF] = 0;
+        chip.emulateCycle();
+
+        // Assert correct loading into the graphic buffer
+        assert_eq!(graphic_buffer, chip.graphics);
+        assert_eq!(0, chip.registers[REG_VF]);
+
+        // Run another cycle to control XOR capability
+        chip.emulateCycle();
+        assert_eq!([0; DISPLAY_WIDTH * DISPLAY_HEIGHT], chip.graphics);
+        assert_eq!(1, chip.registers[REG_VF]);
+    }
+
+    mod test_EX9E {
+        use super::*;
+
+        #[test]
+        fn test_EX9E_skip() {
+            for key in 0..(0xF + 1) {
+                // Create new chip instance
+                let mut chip = Chip8::new();
+
+                // Prepare setup
+                load_opcode(0xE09E, &mut chip);
+                chip.keypad[key] = 1;
+                chip.registers[0] = key as u8;
+
+                let mut expected = chip.clone();
+                expected.pc += 4;
+
+                // Run cycle
+                chip.emulateCycle();
+                assert_eq!(expected, chip);
+            }
+        }
+
+        #[test]
+        fn test_EX9E_noskip() {
+            for key in 0..(0xF + 1) {
+                // Create new chip instance
+                let mut chip = Chip8::new();
+
+                // Prepare setup
+                load_opcode(0xE09E, &mut chip);
+                chip.keypad[key] = 0;
+                chip.registers[0] = key as u8;
+
+                let mut expected = chip.clone();
+                expected.pc += 2;
+
+                // Run cycle
+                chip.emulateCycle();
+                assert_eq!(expected, chip);
+            }
+        }
+    }
+
+    #[test]
+    fn test_FX07() {
+        // Create new chip instance
+        let mut chip = Chip8::new();
+
+        // Prepare setup
+        load_opcode(0xF007, &mut chip);
+        chip.timer_delay = 42;
+
+        let mut expected = chip.clone();
+        expected.pc += 2;
+        expected.registers[0] = 42;
+
+        // Run cycle
+        chip.emulateCycle();
+        assert_eq!(expected, chip);
+    }
+
+    #[test]
+    fn test_FX0A() {
+        // Create new chip instance
+        let mut chip = Chip8::new();
+
+        // Prepare setup
+        load_opcode(0xF00A, &mut chip);
+        let mut expected = chip.clone();
+
+        // Run cycle
+        chip.emulateCycle();
+        assert_eq!(expected, chip);
+
+        // Press key
+        chip.keypad[0] = 1;
+        expected.keypad[0] = 1;
+        expected.pc += 2;
+        expected.registers[0] = 0;
+
+        // Run another cycle
+        chip.emulateCycle();
+        assert_eq!(expected, chip);
     }
 }

@@ -1,3 +1,5 @@
+use crate::config::Chip8Config;
+
 use std::ops::Deref;
 use std::thread::current;
 
@@ -27,7 +29,7 @@ const FONTSET: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
 
-// VF register index
+// Constants
 const REG_V0: usize = 0;
 const REG_VF: usize = 0xF;
 const ADDRESS_BITS: u16 = 12;
@@ -81,6 +83,7 @@ struct Chip8 {
 
     // Utils
     rng: ThreadRng,
+    config: Chip8Config,
 }
 
 impl Chip8 {
@@ -100,6 +103,43 @@ impl Chip8 {
             keypad: [0; 16],
 
             rng: rand::thread_rng(),
+            config: Chip8Config::default(),
+        };
+    }
+
+    fn new_modern() -> Chip8 {
+        return Chip8 {
+            registers: [0; 16],
+            pc: 0x200,
+            index: 0,
+            timer_delay: 0,
+            timer_sound: 0,
+            memory: [0; 4096],
+            stack: [0; 16],
+            sp: 0,
+            graphics: [0; DISPLAY_HEIGHT * DISPLAY_WIDTH],
+            keypad: [0; 16],
+
+            rng: rand::thread_rng(),
+            config: Chip8Config::modern(),
+        };
+    }
+
+    fn new_config(config: Chip8Config) -> Chip8 {
+        return Chip8 {
+            registers: [0; 16],
+            pc: 0x200,
+            index: 0,
+            timer_delay: 0,
+            timer_sound: 0,
+            memory: [0; 4096],
+            stack: [0; 16],
+            sp: 0,
+            graphics: [0; DISPLAY_HEIGHT * DISPLAY_WIDTH],
+            keypad: [0; 16],
+
+            rng: rand::thread_rng(),
+            config: config,
         };
     }
 
@@ -199,7 +239,7 @@ impl Chip8 {
                 } // Add the value of VY to VX (VF = 1 if carry otherwise 0)
                 0x5 => {
                     self._opcode_8XY5(opcode);
-                } // Subtract VY from VX (VF = 1 if borrow occurs, otherwise 0)
+                } // Subtract VY from VX (VF = 1 if no borrow occurs, otherwise 0)
                 0x6 => {
                     self._opcode_8XY6(opcode);
                 } // Shift VY right 1 bit, store in VX (VF = LSB prior to shift)
@@ -241,7 +281,7 @@ impl Chip8 {
                     self._opcode_FX0A(opcode);
                 } // Wait for keypress, store result in VX
                 0x15 => {
-                    self._opcode_FX0A(opcode);
+                    self._opcode_FX15(opcode);
                 } // Set delay timer to VX
                 0x18 => {
                     self._opcode_FX18(opcode);
@@ -395,7 +435,7 @@ impl Chip8 {
         self.registers[REG_VF] = if carry { 1 } else { 0 };
     }
 
-    // Subtract VY from VX, set VF if borrow occurs
+    // Subtract VY from VX, set VF if no borrow occurs
     #[inline]
     fn _opcode_8XY5(&mut self, opcode: u16) {
         let registerX = reg_x!(opcode);
@@ -404,7 +444,10 @@ impl Chip8 {
         let (result, borrow) = self.registers[registerX].overflowing_sub(self.registers[registerY]);
 
         self.registers[registerX] = result;
-        self.registers[REG_VF] = if borrow { 1 } else { 0 };
+
+        //WARNING: Opposite of 'common sense'
+        // Set VF to 1, if VX is larger than VY
+        self.registers[REG_VF] = if borrow { 0 } else { 1 };
     }
 
     // Store VX shifted right on bit in register VX, set VF to LSB prior to shift
@@ -413,8 +456,13 @@ impl Chip8 {
         let registerX = reg_x!(opcode);
         let registerY = reg_y!(opcode);
 
-        self.registers[REG_VF] = extract_bits!(self.registers[registerY], 0, 0x1);
-        self.registers[registerX] = self.registers[registerY] >> 1;
+        // Old implementations did not shift inplace
+        if !self.config.shift_inplace {
+            self.registers[registerX] = self.registers[registerY];
+        }
+
+        self.registers[REG_VF] = extract_bits!(self.registers[registerX], 0, 0x1);
+        self.registers[registerX] = self.registers[registerX] >> 1;
     }
 
     // Set VX to VY - VX, set VF if borrow occurs
@@ -435,8 +483,13 @@ impl Chip8 {
         let registerX = reg_x!(opcode);
         let registerY = reg_y!(opcode);
 
-        self.registers[REG_VF] = extract_bits!(self.registers[registerY], 7, 0x1);
-        self.registers[registerX] = self.registers[registerY] << 1;
+        // Old implementations did not shift inplace
+        if !self.config.shift_inplace {
+            self.registers[registerX] = self.registers[registerY];
+        }
+
+        self.registers[REG_VF] = extract_bits!(self.registers[registerX], 7, 0x1);
+        self.registers[registerX] = self.registers[registerX] << 1;
     }
 
     // Skip the following instruction if VX is NOT equal to VY
@@ -461,8 +514,17 @@ impl Chip8 {
     // Jump to address NNN + V0
     #[inline]
     fn _opcode_BNNN(&mut self, opcode: u16) {
-        let mut address = extract_bits!(opcode, 0, 0xFFF);
-        let sum = address.checked_add(self.registers[0] as u16);
+        let mut address: u16;
+        let sum;
+
+        if self.config.BNNN_quirk {
+            let register = reg_x!(opcode);
+            address = extract_bits!(opcode, 0, 0xFF);
+            sum = address.checked_add(self.registers[register] as u16);
+        } else {
+            address = extract_bits!(opcode, 0, 0xFFF);
+            sum = address.checked_add(self.registers[0] as u16);
+        }
 
         match sum {
             Some(s) if s <= MAX_ADDRESS => address = s,
@@ -572,6 +634,13 @@ impl Chip8 {
         self.pc -= 2;
     }
 
+    // Set the delay timer to the value of register VX
+    #[inline]
+    fn _opcode_FX15(&mut self, opcode: u16) {
+        let register = reg_x!(opcode);
+        self.timer_delay = self.registers[register];
+    }
+
     // Set the sound timer to the value of register VX
     #[inline]
     fn _opcode_FX18(&mut self, opcode: u16) {
@@ -647,6 +716,7 @@ impl Chip8 {
 // Unit tests
 // ===========================
 
+//TODO: Test all config configurations
 // Opcode tests
 #[cfg(test)]
 mod opcode_tests {
@@ -1112,9 +1182,9 @@ mod opcode_tests {
     #[test]
     fn test_8XY5() {
         let cases = [
-            (0x00, 0x00, 0x00, 0x00),
-            (0x01, 0x01, 0x00, 0x00),
-            (0x00, 0x01, 0xFF, 0x01),
+            (0x00, 0x00, 0x00, 0x01),
+            (0x01, 0x01, 0x00, 0x01),
+            (0x00, 0x01, 0xFF, 0x00),
         ];
 
         for (vx, vy, res, vf) in cases {
@@ -1139,7 +1209,7 @@ mod opcode_tests {
     }
 
     #[test]
-    fn test_8XY6() {
+    fn test_8XY6_default() {
         let cases = [(0b1, 0b0, 0b1), (0b10, 0b01, 0b0)];
 
         for (vy, res, vf) in cases {
@@ -1148,6 +1218,31 @@ mod opcode_tests {
 
             // Prepare setup
             chip.registers[1] = vy;
+
+            let mut expected = chip.clone();
+            expected.pc += 2;
+            expected.registers[0] = res;
+            expected.registers[REG_VF] = vf;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+    }
+
+    #[test]
+    fn test_8XY6_inplace() {
+        let cases = [(0b1, 0b0, 0b1), (0b10, 0b01, 0b0)];
+
+        for (vx, res, vf) in cases {
+            let mut chip = Chip8::new_modern();
+            load_opcode(0x8016, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = vx;
+            chip.registers[1] = 42;
 
             let mut expected = chip.clone();
             expected.pc += 2;
@@ -1192,7 +1287,7 @@ mod opcode_tests {
     }
 
     #[test]
-    fn test_8XYE() {
+    fn test_8XYE_default() {
         let cases = [(0x0, 0x0, 0x0), (0xFF, 0xFE, 0x1)];
 
         for (vy, res, vf) in cases {
@@ -1201,6 +1296,31 @@ mod opcode_tests {
 
             // Prepare setup
             chip.registers[1] = vy;
+
+            let mut expected = chip.clone();
+            expected.pc += 2;
+            expected.registers[0] = res;
+            expected.registers[REG_VF] = vf;
+
+            // Run cycle
+            chip.emulateCycle();
+
+            // Assert
+            assert_eq!(expected, chip);
+        }
+    }
+
+    #[test]
+    fn test_8XYE_modern() {
+        let cases = [(0x0, 0x0, 0x0), (0xFF, 0xFE, 0x1)];
+
+        for (vx, res, vf) in cases {
+            let mut chip = Chip8::new_modern();
+            load_opcode(0x801E, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = vx;
+            chip.registers[1] = 42;
 
             let mut expected = chip.clone();
             expected.pc += 2;
@@ -1257,7 +1377,7 @@ mod opcode_tests {
         assert_eq!(expected, chip);
     }
 
-    mod test_BNNN {
+    mod test_BNNN_default {
         use super::*;
 
         #[test]
@@ -1304,6 +1424,71 @@ mod opcode_tests {
 
             // Prepare setup
             chip.registers[0] = 1;
+
+            // Run cycle -> should panic
+            chip.emulateCycle();
+        }
+    }
+
+    // BXNN
+    // TODO: Fix the quirk implementation to use XNN as base address!
+    mod test_BNNN_quirk {
+        use super::*;
+
+        #[test]
+        fn test_BNNN_normal() {
+            // [NN, VX, RESULT]
+            let cases = [(1, 0, 1), (1, 1, 2)];
+
+            let config = Chip8Config {
+                BNNN_quirk: (true),
+                ..Default::default()
+            };
+
+            for (n, v, r) in cases {
+                let mut chip = Chip8::new_config(config);
+                load_opcode((0xB200 | (n & 0xFF)), &mut chip);
+
+                // Prepare setup
+                chip.registers[2] = v;
+
+                let mut expected = chip.clone();
+                expected.pc = r;
+
+                // Run cycle
+                chip.emulateCycle();
+
+                // Assert
+                assert_eq!(expected, chip);
+            }
+        }
+
+        #[test]
+        #[should_panic]
+        fn test_BNNN_overflow() {
+            let config = Chip8Config {
+                BNNN_quirk: (true),
+                ..Default::default()
+            };
+
+            let mut chip = Chip8::new_config(config);
+            load_opcode(0xB0FF, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = 0xFF;
+
+            // Run cycle -> should panic
+            chip.emulateCycle();
+        }
+
+        #[test]
+        #[should_panic]
+        fn test_BNNN_invalid_address() {
+            let mut chip = Chip8::new();
+            load_opcode(0xB0FF, &mut chip);
+
+            // Prepare setup
+            chip.registers[0] = 0;
 
             // Run cycle -> should panic
             chip.emulateCycle();
@@ -1444,5 +1629,74 @@ mod opcode_tests {
         // Run another cycle
         chip.emulateCycle();
         assert_eq!(expected, chip);
+    }
+
+    #[test]
+    fn test_FX15() {
+        // Create new chip instance
+        let mut chip = Chip8::new();
+
+        // Prepare setup
+        load_opcode(0xF015, &mut chip);
+        chip.registers[0] = 42;
+        chip.timer_delay = 3;
+
+        let mut expected = chip.clone();
+        expected.pc += 2;
+        expected.timer_delay = 42;
+
+        // Run cycle
+        chip.emulateCycle();
+        assert_eq!(expected, chip);
+    }
+
+    #[test]
+    fn test_FX18() {
+        // Create new chip instance
+        let mut chip = Chip8::new();
+
+        // Prepare setup
+        load_opcode(0xF018, &mut chip);
+        chip.registers[0] = 42;
+        chip.timer_sound = 3;
+
+        let mut expected = chip.clone();
+        expected.pc += 2;
+        expected.timer_sound = 42;
+
+        // Run cycle
+        chip.emulateCycle();
+        assert_eq!(expected, chip);
+    }
+
+    mod test_FX1E {
+        use super::*;
+
+        fn test_FX1E_normal() {
+            // Create new chip instance
+            let mut chip = Chip8::new();
+
+            // Prepare setup
+            load_opcode(0xF01E, &mut chip);
+            chip.registers[0] = 42;
+            chip.index = 1;
+
+            let mut expected = chip.clone();
+            expected.pc += 2;
+            expected.index = 43;
+
+            // Run cycle
+            chip.emulateCycle();
+            assert_eq!(expected, chip);
+        }
+
+        fn test_FX1E_wrapping() {
+            // Create new chip instance
+            let mut chip = Chip8::new();
+
+            // Prepare setup
+            load_opcode(0xF01E, &mut chip);
+            chip.registers[0] = 1;
+        }
     }
 }

@@ -84,6 +84,7 @@ struct Chip8 {
     // Utils
     rng: ThreadRng,
     config: Chip8Config,
+    wait_for_key_reg: Option<usize>,
 }
 
 impl Chip8 {
@@ -104,6 +105,7 @@ impl Chip8 {
 
             rng: rand::thread_rng(),
             config: Chip8Config::default(),
+            wait_for_key_reg: None,
         };
     }
 
@@ -122,6 +124,7 @@ impl Chip8 {
 
             rng: rand::thread_rng(),
             config: Chip8Config::modern(),
+            wait_for_key_reg: None,
         };
     }
 
@@ -140,11 +143,12 @@ impl Chip8 {
 
             rng: rand::thread_rng(),
             config: config,
+            wait_for_key_reg: None,
         };
     }
 
     // Init/Reset a chip8
-    fn init(&mut self, program: &[u16]) {
+    pub fn init(&mut self, program: &[u16]) {
         // Set reset all values
         self.registers = [0; 16];
         self.pc = 0x200;
@@ -156,6 +160,7 @@ impl Chip8 {
         self.sp = 0;
         self.graphics = [0; 64 * 32];
         self.keypad = [0; 16];
+        self.wait_for_key_reg = None;
 
         // Load fontset into memory
         for i in 0..80 {
@@ -176,8 +181,32 @@ impl Chip8 {
         dbg!(self.memory[self.pc as usize]);
     }
 
+    // Public interface to update the timer registers
+    pub fn interrupt_timer(&mut self) {
+        self.timer_delay.saturating_sub(1);
+        self.timer_sound.saturating_sub(1);
+    }
+
+    pub fn interrupt_key_released(&mut self, key: usize) {
+        self.keypad[key] = 0;
+
+        if let Some(reg) = self.wait_for_key_reg {
+            self.registers[reg] = key as u8;
+            self.wait_for_key_reg = None;
+        }
+    }
+
+    pub fn interrupt_key_pressed(&mut self, key: usize) {
+        self.keypad[key] = 1;
+    }
+
     // Emulating one CPU cycle
-    fn emulateCycle(&mut self) {
+    pub fn emulateCycle(&mut self) {
+        // Check if waiting for keyboard interrupt
+        if let Some(reg) = self.wait_for_key_reg {
+            return;
+        }
+
         // Fetch opcode
         let opcode: u16 = u16::from_be_bytes([
             self.memory[self.pc as usize],
@@ -632,16 +661,8 @@ impl Chip8 {
     // Wait for a keypress and store the result in register VX
     #[inline]
     fn _opcode_FX0A(&mut self, opcode: u16) {
-        if let Some(key_index) = self.keypad.iter().position(|&k| k == 1) {
-            let reg = reg_x!(opcode);
-            self.registers[reg] = key_index as u8;
-            return;
-        }
-
-        // Decrement to execute this instruction again next cycle
-        // Not very pretty, but everything else would be more complicated...
-        // Maybe add a flag in the future?
-        self.pc -= 2;
+        let reg = reg_x!(opcode);
+        self.wait_for_key_reg = Some(reg);
     }
 
     // Set the delay timer to the value of register VX
@@ -1674,30 +1695,6 @@ mod opcode_tests {
     }
 
     #[test]
-    fn test_FX0A() {
-        // Create new chip instance
-        let mut chip = Chip8::new();
-
-        // Prepare setup
-        load_opcode(0xF00A, &mut chip);
-        let mut expected = chip.clone();
-
-        // Run cycle
-        chip.emulateCycle();
-        assert_eq!(expected, chip);
-
-        // Press key
-        chip.keypad[0] = 1;
-        expected.keypad[0] = 1;
-        expected.pc += 2;
-        expected.registers[0] = 0;
-
-        // Run another cycle
-        chip.emulateCycle();
-        assert_eq!(expected, chip);
-    }
-
-    #[test]
     fn test_FX15() {
         // Create new chip instance
         let mut chip = Chip8::new();
@@ -1768,6 +1765,31 @@ mod opcode_tests {
 
     #[test]
     fn test_FX0A() {
-        return;
+        // Create new chip instance
+        let mut chip = Chip8::new();
+
+        // Prepare setup
+        let program = [0xF00A, 0x1400];
+        chip.init(&program);
+
+        let mut expected = chip.clone();
+        expected.pc += 2;
+        expected.wait_for_key_reg = Some(0);
+
+        // Run cycle
+        chip.emulateCycle();
+        assert_eq!(expected, chip);
+
+        // Run another cycle
+        chip.emulateCycle();
+        assert_eq!(expected, chip);
+
+        // Send release interrupt and run another cycle
+        chip.interrupt_key_released(2);
+        chip.emulateCycle();
+        expected.pc = 0x400;
+        expected.registers[0] = 2;
+
+        assert_eq!(expected, chip);
     }
 }

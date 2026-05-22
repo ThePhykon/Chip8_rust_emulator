@@ -1792,4 +1792,32 @@ mod opcode_tests {
 
         assert_eq!(expected, chip);
     }
+
+    #[test]
+    fn test_FX29() {
+        let mut chip = Chip8::new();
+        load_opcode(0xF029, &mut chip);
+
+        let sprite = [0x90, 0x90, 0xF0, 0x10, 0x10];
+
+        // Prepare setup
+        chip.registers[0] = 4;
+        let mut expected = chip.clone();
+        expected.pc += 2;
+
+        // Run cycle
+        chip.emulateCycle();
+
+        // Ignore index in assert to make independent of the memory adress of the sprite data
+        expected.index = chip.index;
+
+        // Assert
+        assert_eq!(expected, chip);
+
+        // Check if index points to correct sprite
+        assert_eq!(
+            &chip.memory[chip.index as usize..(chip.index as usize + sprite.len())],
+            &sprite
+        );
+    }
 }

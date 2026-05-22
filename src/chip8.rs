@@ -519,7 +519,7 @@ impl Chip8 {
 
         if self.config.BNNN_quirk {
             let register = reg_x!(opcode);
-            address = extract_bits!(opcode, 0, 0xFF);
+            address = extract_bits!(opcode, 0, 0xFFF);
             sum = address.checked_add(self.registers[register] as u16);
         } else {
             address = extract_bits!(opcode, 0, 0xFFF);
@@ -551,9 +551,13 @@ impl Chip8 {
     // Set VF if any pixels are changed to unset
     #[inline]
     fn _opcode_DXYN(&mut self, opcode: u16) {
-        let coordX = reg_x!(opcode) % DISPLAY_WIDTH;
-        let mut coordY = reg_y!(opcode) % DISPLAY_HEIGHT;
+        let registerX = reg_x!(opcode);
+        let registerY = reg_y!(opcode);
         let num_bytes = extract_bits!(opcode, 0, 0xF);
+
+        // Get coordinates
+        let coordX = self.registers[registerX] as usize % DISPLAY_WIDTH;
+        let mut coordY = self.registers[registerY] as usize % DISPLAY_WIDTH;
 
         let sprites = &self.memory[self.index as usize..(self.index + num_bytes) as usize];
         self.registers[REG_VF] = 0;
@@ -564,7 +568,7 @@ impl Chip8 {
                 let x_option = coordX.checked_add(i);
 
                 // If we reached the border of the monitor, go to the next row (Clipping)
-                if x_option.is_none() {
+                if x_option.is_none() || x_option.unwrap() >= DISPLAY_WIDTH {
                     break;
                 }
 
@@ -583,6 +587,12 @@ impl Chip8 {
 
             // Safely move to next column (=> clipping if necessary)
             if let Some(y) = coordY.checked_add(1) {
+                // Check if end of monitor is reached
+                if y >= DISPLAY_HEIGHT {
+                    return;
+                }
+
+                // Else set coordY to new y-coordinate
                 coordY = y;
             } else {
                 break;
@@ -659,7 +669,7 @@ impl Chip8 {
     #[inline]
     fn _opcode_FX29(&mut self, opcode: u16) {
         let register = reg_x!(opcode);
-        let digit = self.registers[register];
+        let digit = self.registers[register] & 0xFF;
         self.index = digit as u16 * SIZE_OF_SPRITE;
     }
 
@@ -1438,7 +1448,7 @@ mod opcode_tests {
         #[test]
         fn test_BNNN_normal() {
             // [NN, VX, RESULT]
-            let cases = [(1, 0, 1), (1, 1, 2)];
+            let cases = [(1, 0, 0x201), (1, 1, 0x202)];
 
             let config = Chip8Config {
                 BNNN_quirk: (true),
@@ -1472,10 +1482,10 @@ mod opcode_tests {
             };
 
             let mut chip = Chip8::new_config(config);
-            load_opcode(0xB0FF, &mut chip);
+            load_opcode(0xBFFF, &mut chip);
 
             // Prepare setup
-            chip.registers[0] = 0xFF;
+            chip.registers[REG_VF] = 0xFF;
 
             // Run cycle -> should panic
             chip.emulateCycle();
@@ -1484,11 +1494,16 @@ mod opcode_tests {
         #[test]
         #[should_panic]
         fn test_BNNN_invalid_address() {
-            let mut chip = Chip8::new();
-            load_opcode(0xB0FF, &mut chip);
+            let config = Chip8Config {
+                BNNN_quirk: (true),
+                ..Default::default()
+            };
+
+            let mut chip = Chip8::new_config(config);
+            load_opcode(0xBFFF, &mut chip);
 
             // Prepare setup
-            chip.registers[0] = 0;
+            chip.registers[REG_VF] = 1;
 
             // Run cycle -> should panic
             chip.emulateCycle();
@@ -1500,49 +1515,100 @@ mod opcode_tests {
         // We skip this test for now
     }
 
-    #[test]
-    fn test_DXYN() {
-        let sprites: [u8; 5] = [0b01010101, 0b10101010, 0b01010101, 0b10101010, 0b01010101];
+    mod test_DXYN {
+        use super::*;
 
-        // Constructing graphic buffer
-        let mut graphic_buffer = [0u8; DISPLAY_WIDTH * DISPLAY_HEIGHT];
-        graphic_buffer[0..8].copy_from_slice(&[0, 1, 0, 1, 0, 1, 0, 1]);
-        let row1 = DISPLAY_WIDTH;
-        graphic_buffer[row1..row1 + 8].copy_from_slice(&[1, 0, 1, 0, 1, 0, 1, 0]);
-        let row2 = 2 * DISPLAY_WIDTH;
-        graphic_buffer[row2..row2 + 8].copy_from_slice(&[0, 1, 0, 1, 0, 1, 0, 1]);
-        let row3 = 3 * DISPLAY_WIDTH;
-        graphic_buffer[row3..row3 + 8].copy_from_slice(&[1, 0, 1, 0, 1, 0, 1, 0]);
-        let row4 = 4 * DISPLAY_WIDTH;
-        graphic_buffer[row4..row4 + 8].copy_from_slice(&[0, 1, 0, 1, 0, 1, 0, 1]);
+        #[test]
+        fn test_DXYN_normal() {
+            let mut x = DISPLAY_WIDTH;
+            let mut y = DISPLAY_WIDTH;
 
-        // Create new chip instance
-        let mut chip = Chip8::new();
+            // Sanity check
+            if DISPLAY_HEIGHT >= u8::MAX as usize || DISPLAY_WIDTH >= u8::MAX as usize {
+                // Skip wrapping test due to display size being bigger than a register can hold
+                x = 0;
+                y = 0;
+            }
 
-        // Load program
-        let program = [0xD005, 0xD005];
+            let sprites: [u8; 5] = [0b01010101, 0b10101010, 0b01010101, 0b10101010, 0b01010101];
 
-        // Init chip with program
-        chip.init(&program);
+            // Constructing graphic buffer
+            let mut graphic_buffer = [0u8; DISPLAY_WIDTH * DISPLAY_HEIGHT];
+            graphic_buffer[0..8].copy_from_slice(&[0, 1, 0, 1, 0, 1, 0, 1]);
+            let row1 = DISPLAY_WIDTH;
+            graphic_buffer[row1..row1 + 8].copy_from_slice(&[1, 0, 1, 0, 1, 0, 1, 0]);
+            let row2 = 2 * DISPLAY_WIDTH;
+            graphic_buffer[row2..row2 + 8].copy_from_slice(&[0, 1, 0, 1, 0, 1, 0, 1]);
+            let row3 = 3 * DISPLAY_WIDTH;
+            graphic_buffer[row3..row3 + 8].copy_from_slice(&[1, 0, 1, 0, 1, 0, 1, 0]);
+            let row4 = 4 * DISPLAY_WIDTH;
+            graphic_buffer[row4..row4 + 8].copy_from_slice(&[0, 1, 0, 1, 0, 1, 0, 1]);
 
-        let index = 0x250;
-        chip.index = index;
+            // Create new chip instance
+            let mut chip = Chip8::new();
 
-        for (i, &sprite) in sprites.iter().enumerate() {
-            chip.memory[index as usize + i] = sprite;
+            // Load program
+            let program = [0xD015, 0xD015];
+
+            // Init chip with program
+            chip.init(&program);
+
+            let index = 0x250;
+            chip.index = index;
+
+            for (i, &sprite) in sprites.iter().enumerate() {
+                chip.memory[index as usize + i] = sprite;
+            }
+
+            chip.registers[REG_VF] = 0;
+            chip.registers[0] = x as u8;
+            chip.registers[1] = y as u8;
+            chip.emulateCycle();
+
+            // Assert correct loading into the graphic buffer
+            assert_eq!(graphic_buffer, chip.graphics);
+            assert_eq!(0, chip.registers[REG_VF]);
+
+            // Run another cycle to control XOR capability
+            chip.emulateCycle();
+            assert_eq!([0; DISPLAY_WIDTH * DISPLAY_HEIGHT], chip.graphics);
+            assert_eq!(1, chip.registers[REG_VF]);
         }
 
-        chip.registers[REG_VF] = 0;
-        chip.emulateCycle();
+        #[test]
+        fn test_DXYN_clipping() {
+            let sprites: [u8; 5] = [0b10101010, 0b01010101, 0b10101010, 0b01010101, 0b10101010];
 
-        // Assert correct loading into the graphic buffer
-        assert_eq!(graphic_buffer, chip.graphics);
-        assert_eq!(0, chip.registers[REG_VF]);
+            // Constructing graphic buffer
+            let mut graphic_buffer = [0u8; DISPLAY_WIDTH * DISPLAY_HEIGHT];
+            let graphic_idx = (DISPLAY_HEIGHT - 1) * DISPLAY_WIDTH + (DISPLAY_WIDTH - 1);
+            graphic_buffer[graphic_idx] = 1;
 
-        // Run another cycle to control XOR capability
-        chip.emulateCycle();
-        assert_eq!([0; DISPLAY_WIDTH * DISPLAY_HEIGHT], chip.graphics);
-        assert_eq!(1, chip.registers[REG_VF]);
+            // Create new chip instance
+            let mut chip = Chip8::new();
+
+            // Load program
+            let program = [0xD015];
+
+            // Init chip with program
+            chip.init(&program);
+
+            let index = 0x250;
+            chip.index = index;
+
+            for (i, &sprite) in sprites.iter().enumerate() {
+                chip.memory[index as usize + i] = sprite;
+            }
+
+            chip.registers[REG_VF] = 0;
+            chip.registers[0] = (DISPLAY_WIDTH - 1) as u8;
+            chip.registers[1] = (DISPLAY_HEIGHT - 1) as u8;
+            chip.emulateCycle();
+
+            // Assert correct loading into the graphic buffer
+            assert_eq!(graphic_buffer, chip.graphics);
+            assert_eq!(0, chip.registers[REG_VF]);
+        }
     }
 
     mod test_EX9E {
@@ -1698,5 +1764,10 @@ mod opcode_tests {
             load_opcode(0xF01E, &mut chip);
             chip.registers[0] = 1;
         }
+    }
+
+    #[test]
+    fn test_FX0A() {
+        return;
     }
 }

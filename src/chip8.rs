@@ -1819,4 +1819,30 @@ mod opcode_tests {
             &sprite
         );
     }
+
+    #[test]
+    fn test_FX33() {
+        let mut chip = Chip8::new();
+        load_opcode(0xF033, &mut chip);
+
+        // Set index memory position
+        chip.index = 0x255;
+
+        // Set register
+        chip.registers[0] = 123;
+
+        // Create target chip state
+        let mut expected = chip.clone();
+        expected.pc += 2;
+        
+        let start = chip.index as usize;
+        expected.memory[start..start + 3]
+            .copy_from_slice(&[1, 2, 3]);
+
+        // Run cycle
+        chip.emulateCycle();
+
+        // Assert
+        assert_eq!(expected, chip);
+    }
 }

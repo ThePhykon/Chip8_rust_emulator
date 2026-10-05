@@ -701,19 +701,18 @@ impl Chip8 {
         let register = reg_x!(opcode);
         let value = self.registers[register];
 
-        // Bounds checking for debugging
-        // Even though rust would panic anyways, this is nicer for debugging
-        if self.index > (MAX_ADDRESS - 2) {
+        // Bounds checking
+        if self.index > MAX_ADDRESS - 2 {
             panic!(
                 "Opcode FX33 ({:04X}): Not enough memory left! Index would write out-of-bound.",
                 self.pc
             );
         }
 
-        for i in 0..3 {
-            // TODO: Finish opcode FX33 implementation
-            unimplemented!();
-        }
+        // Write decimals to memory
+        self.memory[self.index as usize] = value / 100;
+        self.memory[(self.index + 1) as usize] = (value / 10) % 10;
+        self.memory[(self.index + 2) as usize] = value % 10;
     }
 
     //TODO: Finish last opcode FX65
